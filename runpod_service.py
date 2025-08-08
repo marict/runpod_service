@@ -162,8 +162,9 @@ def _build_container_script(
         cmds.append(f"git checkout {shlex.quote(commit_hash)}")
         cmds.append("python -m pip install --upgrade pip setuptools wheel")
         cmds.append(
-            "if [ -f requirements_dev.txt ]; then pip install -r requirements_dev.txt; fi"
+            "[ -f requirements_dev.txt ] || { echo '[RUNPOD] ERROR: requirements_dev.txt missing at repo root'; exit 1; }"
         )
+        cmds.append("pip install -r requirements_dev.txt")
         script_log = f"/runpod-volume/{script_relpath.name}_$(date +%Y%m%d_%H%M%S).log"
         script_cmd = (
             f'log_file="{script_log}"; '
@@ -287,6 +288,13 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
         except ValueError:
             # If not inside repo root (shouldn't happen if has_repo True), fallback to basename
             script_relpath = Path(script_basename)
+        # Ensure requirements_dev.txt exists at repo root prior to pod creation
+        requirements_path = repo_root / "requirements_dev.txt"
+        if not requirements_path.exists():
+            raise RunPodError(
+                f"requirements_dev.txt not found at repository root: {requirements_path}. "
+                "This file is required for environment setup."
+            )
 
     # Init W&B locally first and open browser
     placeholder_name = f"pod-id-pending{'-' + pod_name if pod_name else ''}"
