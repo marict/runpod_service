@@ -1,0 +1,4 @@
+wandb
+requests
+graphql-core
+runpod
