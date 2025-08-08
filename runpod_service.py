@@ -128,7 +128,6 @@ def _join_shell_args(args: Iterable[str]) -> str:
 
 def _build_container_script(
     *,
-    has_repo: bool,
     repo_url: Optional[str],
     commit_hash: Optional[str],
     script_relpath: Optional[Path],
@@ -146,7 +145,8 @@ def _build_container_script(
     cmds.append(nvidia_repo_cleanup)
     cmds.append("apt-get update -y || true")
     cmds.append("apt-get install -y --no-install-recommends git tree htop || true")
-    cmds.append("cd /workspace")
+    cmds.append("cd /workspace || true")
+    cmds.append("REPO_DIR=/tmp/repo")
     cmds.append("export PIP_CACHE_DIR='/runpod-volume/pip-cache'")
     cmds.append("mkdir -p '$PIP_CACHE_DIR'")
     # Safer PyTorch CUDA defaults to reduce chances of segfaults / OOM
@@ -154,29 +154,24 @@ def _build_container_script(
     cmds.append("export TORCHINDUCTOR_AUTOTUNE=0")
     cmds.append("export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512")
 
-    if has_repo and repo_url and commit_hash and script_relpath is not None:
-        # Clone, checkout exact commit, install dev requirements if present
-        cmds.append("echo '[RUNPOD] Cloning repository...'")
-        cmds.append(f"git clone {shlex.quote(repo_url)} repo")
-        cmds.append("cd /workspace/repo")
-        cmds.append(f"git checkout {shlex.quote(commit_hash)}")
-        cmds.append("python -m pip install --upgrade pip setuptools wheel")
-        cmds.append(
-            "[ -f requirements_dev.txt ] || { echo '[RUNPOD] ERROR: requirements_dev.txt missing at repo root'; exit 1; }"
-        )
-        cmds.append("pip install -r requirements_dev.txt")
-        script_log = f"/runpod-volume/{script_relpath.name}_$(date +%Y%m%d_%H%M%S).log"
-        script_cmd = (
-            f'log_file="{script_log}"; '
-            f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
-        ).rstrip()
-        cmds.append("echo '[RUNPOD] Launching script in repo...'")
-        cmds.append(script_cmd)
-        cmds.append("tail -f /dev/null")
-    else:
-        # We now always require a git repo; this path should not be reachable
-        cmds.append("echo '[RUNPOD] ERROR: script is not inside a git repo' && false")
-
+    # Clone, checkout exact commit, install dev requirements
+    cmds.append("echo '[RUNPOD] Cloning repository into /tmp/repo...'")
+    cmds.append(f'rm -rf "$REPO_DIR" && git clone {shlex.quote(repo_url)} "$REPO_DIR"')
+    cmds.append('cd "$REPO_DIR"')
+    cmds.append(f"git checkout {shlex.quote(commit_hash)}")
+    cmds.append("python -m pip install --upgrade pip setuptools wheel")
+    cmds.append(
+        '[ -f "$REPO_DIR/requirements_dev.txt" ] || { echo "[RUNPOD] ERROR: requirements_dev.txt missing at repo root: $REPO_DIR/requirements_dev.txt"; ls -la "$REPO_DIR"; exit 1; }'
+    )
+    cmds.append('pip install -r "$REPO_DIR/requirements_dev.txt"')
+    script_log = f"/runpod-volume/{script_relpath.name}_$(date +%Y%m%d_%H%M%S).log"
+    script_cmd = (
+        f'log_file="{script_log}"; '
+        f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
+    ).rstrip()
+    cmds.append("echo '[RUNPOD] Launching script in repo...'")
+    cmds.append(script_cmd)
+    cmds.append("tail -f /dev/null")
     return " && ".join(cmds)
 
 
@@ -272,9 +267,9 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     has_repo = _is_git_repo(script_dir) and (_repo_root_for(script_dir) is not None)
     if not has_repo:
         raise RunPodError(
-            "Script must be inside a git repository. Ensure your script path is within a repo and retry."
+            f"Script {script_abs} must be inside a git repository. Ensure your script path is within a repo and retry."
         )
-    repo_root: Optional[Path] = _repo_root_for(script_dir) if has_repo else None
+    repo_root: Optional[Path] = _repo_root_for(script_dir)
     repo_url: Optional[str] = None
     commit_hash: Optional[str] = None
     script_relpath: Optional[Path] = None
@@ -286,7 +281,6 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
         try:
             script_relpath = script_abs.relative_to(repo_root)
         except ValueError:
-            # If not inside repo root (shouldn't happen if has_repo True), fallback to basename
             script_relpath = Path(script_basename)
         # Ensure requirements_dev.txt exists at repo root prior to pod creation
         requirements_path = repo_root / "requirements_dev.txt"
@@ -307,7 +301,6 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
 
     # Build container script
     container_script = _build_container_script(
-        has_repo=True,
         repo_url=repo_url,
         commit_hash=commit_hash,
         script_relpath=script_relpath,
