@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import os
 import shlex
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
@@ -35,6 +35,7 @@ class LaunchConfig:
     api_key: Optional[str]
     wandb_project: str
     wandb_entity: Optional[str]
+    debug: bool = False
 
 
 def _is_git_repo(path: Path) -> bool:
@@ -225,73 +226,45 @@ def _resolve_gpu_id(gpu_type: str) -> str:
     raise RunPodError(f"GPU type '{gpu_type}' not found")
 
 
-def _usage_text() -> str:
+def _parse_cli(argv: List[str]) -> LaunchConfig:
     example = (
-        "Example:\n"
+        "\nExample:\n"
         "  python /Users/paul_curry/ai2/runpod_general/runpod_service.py "
         "/Users/paul_curry/ai2/runpod_general/service_test.py hello --named-arg world --pod-name service-test\n"
     )
-    usage = (
-        "Usage: runpod_service.py <script.py> [script-args...] "
-        "[--pod-name NAME] [--gpu-type TYPE] [--api-key KEY] [--wandb-project P] [--wandb-entity E]\n\n"
-        "Note: <script.py> must reside within a git repository. The repo must be clean (no uncommitted changes).\n\n"
-        + example
+    parser = argparse.ArgumentParser(
+        description=(
+            "Launch a RunPod job that clones the script's git repo at the current commit, "
+            "installs requirements_dev.txt if present, and runs the script with given args.\n"
+            "Note: <script.py> must reside within a git repository with no uncommitted changes."
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=example,
     )
-    return usage
+    parser.add_argument("script", help="Path to the Python script inside a git repo")
+    parser.add_argument("--pod-name", dest="pod_name")
+    parser.add_argument("--gpu-type", dest="gpu_type", default=DEFAULT_GPU_TYPE)
+    parser.add_argument("--api-key", dest="api_key")
+    parser.add_argument(
+        "--wandb-project", dest="wandb_project", default="nalm-benchmark"
+    )
+    parser.add_argument(
+        "--wandb-entity", dest="wandb_entity", default="paul-michael-curry-productions"
+    )
+    parser.add_argument("--debug", action="store_true", help="Print debug info")
 
-
-def _parse_cli(argv: List[str]) -> LaunchConfig:
-    if not argv:
-        raise RunPodError(_usage_text())
-
-    # First positional is the script
-    script_token = argv[0]
-    script_path = Path(script_token)
-
-    # Defaults
-    pod_name: Optional[str] = None
-    gpu_type = DEFAULT_GPU_TYPE
-    api_key: Optional[str] = None
-    wandb_project = "nalm-benchmark"  # default per user's preference
-    wandb_entity: Optional[str] = "paul-michael-curry-productions"
-
-    # Parse the rest; intercept our flags anywhere; forward other tokens to the script
-    forwarded: List[str] = []
-    idx = 1
-    while idx < len(argv):
-        tok = argv[idx]
-
-        def take_value(opt: str) -> str:
-            nonlocal idx
-            if "=" in opt:
-                return opt.split("=", 1)[1]
-            if idx + 1 >= len(argv):
-                raise RunPodError(f"Flag requires a value: {opt}")
-            idx += 1
-            return argv[idx]
-
-        if tok.startswith("--pod-name"):
-            pod_name = take_value(tok)
-        elif tok.startswith("--gpu-type"):
-            gpu_type = take_value(tok)
-        elif tok.startswith("--api-key"):
-            api_key = take_value(tok)
-        elif tok.startswith("--wandb-project"):
-            wandb_project = take_value(tok)
-        elif tok.startswith("--wandb-entity"):
-            wandb_entity = take_value(tok)
-        else:
-            forwarded.append(tok)
-        idx += 1
+    # Parse known args; forward the rest to the script
+    known, unknown = parser.parse_known_args(argv)
 
     return LaunchConfig(
-        script_path=script_path,
-        script_args=forwarded,
-        pod_name=pod_name,
-        gpu_type=gpu_type,
-        api_key=api_key,
-        wandb_project=wandb_project,
-        wandb_entity=wandb_entity,
+        script_path=Path(known.script),
+        script_args=unknown,
+        pod_name=known.pod_name,
+        gpu_type=known.gpu_type,
+        api_key=known.api_key,
+        wandb_project=known.wandb_project,
+        wandb_entity=known.wandb_entity,
+        debug=known.debug,
     )
 
 
@@ -346,12 +319,12 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     )
 
     docker_args = _quote_bash_for_graphql(container_script)
-    # Debug visibility
-    print("=== DEBUG: Docker script ===")
-    print(container_script)
-    print("=== DEBUG: Final docker args ===")
-    print(docker_args)
-    print("=== END DEBUG ===")
+    if cfg.debug:
+        print("=== DEBUG: Docker script ===")
+        print(container_script)
+        print("=== DEBUG: Final docker args ===")
+        print(docker_args)
+        print("=== END DEBUG ===")
 
     # Setup RunPod
     runpod.api_key = (
@@ -406,22 +379,6 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     # Provide a quick status/poll to confirm launch visibility
     console_url = f"https://www.runpod.io/console/pods/{pod_id}"
     print(f"RunPod console: {console_url}")
-    try:
-        # best-effort short poll
-        for _ in range(10):
-            pod_info = runpod.get_pod(pod_id) if hasattr(runpod, "get_pod") else None
-            status = (
-                pod_info.get("desiredStatus") if isinstance(pod_info, dict) else None
-            )
-            phase = (
-                pod_info.get("runtime", {}).get("totalExecutionTime", None)
-                if isinstance(pod_info, dict)
-                else None
-            )
-            print(f"Pod status: {status}, runtime.totalExecutionTime: {phase}")
-            time.sleep(3)
-    except Exception:
-        pass
 
     # Rename W&B run to include actual pod id (and pod name)
     try:
@@ -468,9 +425,6 @@ def stop_runpod(pod_id: Optional[str] = None, api_key: Optional[str] = None) -> 
 
 
 def main(argv: List[str]) -> None:
-    if not argv or any(a in {"-h", "--help"} for a in argv):
-        print(_usage_text())
-        return
     cfg = _parse_cli(argv)
     start_runpod_job(cfg)
 
