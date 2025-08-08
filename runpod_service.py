@@ -34,7 +34,6 @@ class LaunchConfig:
     gpu_type: str
     api_key: Optional[str]
     wandb_project: str
-    wandb_entity: Optional[str]
     debug: bool = False
 
 
@@ -199,12 +198,9 @@ def _open_browser(url: str) -> None:
     print(f"Could not open Chrome. Please manually visit: {url}")
 
 
-def _init_local_wandb(
-    project: str, entity: Optional[str], run_name: str
-) -> Tuple[str, str]:
+def _init_local_wandb(project: str, run_name: str) -> Tuple[str, str]:
     run = wandb.init(
         project=project,
-        entity=entity,
         name=run_name,
         tags=["runpod", "general"],
         notes=run_name,
@@ -247,9 +243,6 @@ def _parse_cli(argv: List[str]) -> LaunchConfig:
     parser.add_argument(
         "--wandb-project", dest="wandb_project", default="nalm-benchmark"
     )
-    parser.add_argument(
-        "--wandb-entity", dest="wandb_entity", default="paul-michael-curry-productions"
-    )
     parser.add_argument("--debug", action="store_true", help="Print debug info")
 
     # Parse known args; forward the rest to the script
@@ -262,7 +255,6 @@ def _parse_cli(argv: List[str]) -> LaunchConfig:
         gpu_type=known.gpu_type,
         api_key=known.api_key,
         wandb_project=known.wandb_project,
-        wandb_entity=known.wandb_entity,
         debug=known.debug,
     )
 
@@ -301,9 +293,7 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     wandb_url = ""
     wandb_run_id = ""
     try:
-        wandb_url, wandb_run_id = _init_local_wandb(
-            cfg.wandb_project, cfg.wandb_entity, placeholder_name
-        )
+        wandb_url, wandb_run_id = _init_local_wandb(cfg.wandb_project, placeholder_name)
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: failed to initialize local W&B run: {exc}")
 
@@ -340,8 +330,6 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     if os.getenv("WANDB_API_KEY"):
         env_vars["WANDB_API_KEY"] = os.getenv("WANDB_API_KEY", "")
     env_vars["WANDB_PROJECT"] = cfg.wandb_project
-    if cfg.wandb_entity:
-        env_vars["WANDB_ENTITY"] = cfg.wandb_entity
     if wandb_run_id:
         env_vars["WANDB_RUN_ID"] = wandb_run_id
         env_vars["WANDB_RESUME"] = "allow"
