@@ -133,7 +133,6 @@ def _build_container_script(
     repo_url: Optional[str],
     commit_hash: Optional[str],
     script_relpath: Optional[Path],
-    original_script_arg: str,
     forwarded_args: List[str],
 ) -> str:
     # 0) Clean up NVIDIA/CUDA APT sources to avoid hash-mismatch errors
@@ -314,7 +313,6 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
         repo_url=repo_url,
         commit_hash=commit_hash,
         script_relpath=script_relpath,
-        original_script_arg=str(cfg.script_path),
         forwarded_args=cfg.script_args,
     )
 
