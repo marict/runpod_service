@@ -225,8 +225,8 @@ def _resolve_gpu_id(gpu_type: str) -> str:
 def _parse_cli(argv: List[str]) -> LaunchConfig:
     example = (
         "\nExample:\n"
-        "  python /Users/paul_curry/ai2/runpod_general/runpod_service.py "
-        "/Users/paul_curry/ai2/runpod_general/service_test.py hello --named-arg world --pod-name service-test\n"
+        "  python /Users/paul_curry/ai2/runpod_service/runpod_service.py "
+        "/Users/paul_curry/ai2/runpod_service/service_test.py hello --named-arg world --pod-name service-test\n"
     )
     parser = argparse.ArgumentParser(
         description=(
