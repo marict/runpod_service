@@ -425,6 +425,7 @@ def stop_runpod(pod_id: Optional[str] = None, api_key: Optional[str] = None) -> 
 
 
 def main(argv: List[str]) -> None:
+    # argparse within _parse_cli handles -h/--help and errors itself.
     cfg = _parse_cli(argv)
     start_runpod_job(cfg)
 
