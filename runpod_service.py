@@ -260,13 +260,14 @@ def _build_container_script(
     cmds.append("export log_file")
     # Ensure repository roots are on PYTHONPATH so top-level modules resolve (target + runpod_service)
     cmds.append('export PYTHONPATH="$REPO_DIR:${PYTHONPATH:-}"')
-    # Make runpod_service import path robust whether the repo root is the package dir or contains it
-    cmds.append('RUNPOD_SERVICE_IMPORT_DIR="$RUNPOD_SERVICE_DIR"')
+    # Robust runpod_service import path
     cmds.append(
-        'if [ -d "$RUNPOD_SERVICE_DIR/runpod_service" ]; then RUNPOD_SERVICE_IMPORT_DIR="$RUNPOD_SERVICE_DIR"; '
-        'elif [ "$(basename "$RUNPOD_SERVICE_DIR")" = "runpod_service" ]; then RUNPOD_SERVICE_IMPORT_DIR="$(dirname "$RUNPOD_SERVICE_DIR")"; fi'
+        'if [ -d "$RUNPOD_SERVICE_DIR/runpod_service" ]; then '
+        'export PYTHONPATH="$RUNPOD_SERVICE_DIR:$PYTHONPATH"; '
+        'elif [ -f "$RUNPOD_SERVICE_DIR/__init__.py" ] && [ "$(basename "$RUNPOD_SERVICE_DIR")" = "runpod_service" ]; then '
+        'export PYTHONPATH="$(dirname "$RUNPOD_SERVICE_DIR"):$PYTHONPATH"; '
+        'else echo "[RUNPOD] ERROR: could not locate runpod_service package at $RUNPOD_SERVICE_DIR"; ls -la "$RUNPOD_SERVICE_DIR"; exit 1; fi'
     )
-    cmds.append('export PYTHONPATH="$RUNPOD_SERVICE_IMPORT_DIR:$PYTHONPATH"')
     # Install runpod_service repo requirements if it is a different repo than the target
     cmds.append(
         '[ "$RUNPOD_SERVICE_DIR" = "$REPO_DIR" ] || { '
