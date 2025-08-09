@@ -23,7 +23,7 @@ class RunPodError(Exception):
 # Defaults aligned with existing projects
 DEFAULT_GPU_TYPE = "NVIDIA RTX 2000 Ada Generation"
 DEFAULT_IMAGE = "runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04"
-NETWORK_VOLUME_ID = "h3tyejvqqb"  # Same as nanoGPT-llm-extraction
+NETWORK_VOLUME_ID = "h3tyejvqqb"
 
 
 @dataclass
@@ -116,6 +116,78 @@ def _git_commit_hash(repo_root: Path) -> str:
         raise RunPodError("Failed to get current git commit hash.") from exc
 
 
+def _normalize_repo_url(repo_url: str) -> str:
+    """Return an HTTPS clone URL suitable for a headless container.
+
+    - Converts SSH URLs (git@github.com:owner/repo.git) to HTTPS
+    - If GITHUB_TOKEN is set, embeds token for private repos
+    """
+    url = repo_url.strip()
+    if url.startswith("git@github.com:"):
+        owner_repo = url.split(":", 1)[1]
+        url = f"https://github.com/{owner_repo}"
+    elif url.startswith("ssh://git@github.com/"):
+        owner_repo = url.split("github.com/", 1)[1]
+        url = f"https://github.com/{owner_repo}"
+
+    token = os.getenv("GITHUB_TOKEN")
+    if token and url.startswith("https://github.com/"):
+        # GitHub accepts x-access-token as username for token auth
+        url = url.replace(
+            "https://github.com/", f"https://x-access-token:{token}@github.com/"
+        )
+    return url
+
+
+def _get_current_branch(repo_root: Path) -> Optional[str]:
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        branch = res.stdout.strip()
+        return None if branch == "HEAD" else branch
+    except subprocess.CalledProcessError:
+        return None
+
+
+def _branch_matches_origin(repo_root: Path, branch: str, commit_hash: str) -> bool:
+    try:
+        res = subprocess.run(
+            ["git", "ls-remote", "origin", branch],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        line = res.stdout.strip().splitlines()[0] if res.stdout.strip() else ""
+        remote_sha = line.split()[0] if line else ""
+        return bool(remote_sha) and remote_sha == commit_hash
+    except subprocess.CalledProcessError:
+        return False
+
+
+def _get_origin_branch_sha(repo_root: Path, branch: str) -> Optional[str]:
+    try:
+        res = subprocess.run(
+            ["git", "ls-remote", "origin", branch],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        line = res.stdout.strip().splitlines()[0] if res.stdout.strip() else ""
+        return line.split()[0] if line else None
+    except subprocess.CalledProcessError:
+        return None
+
+
 def _quote_bash_for_graphql(command: str) -> str:
     # Wrap into bash -c and escape properly for GraphQL string literal
     wrapped = f"bash -c {shlex.quote(command)}"
@@ -132,6 +204,8 @@ def _build_container_script(
     commit_hash: Optional[str],
     script_relpath: Optional[Path],
     forwarded_args: List[str],
+    runpod_service_repo_url: Optional[str] = None,
+    runpod_service_commit: Optional[str] = None,
 ) -> str:
     # 0) Clean up NVIDIA/CUDA APT sources to avoid hash-mismatch errors
     nvidia_repo_cleanup = "rm -f /etc/apt/sources.list.d/cuda*.list /etc/apt/sources.list.d/nvidia*.list || true"
@@ -153,9 +227,11 @@ def _build_container_script(
     cmds.append("export CUDA_LAUNCH_BLOCKING=1")
     cmds.append("export TORCHINDUCTOR_AUTOTUNE=0")
     cmds.append("export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512")
+    # Avoid unsupported Flash/MemEfficient kernels in SDPA by default
+    cmds.append("export PYTORCH_SDP_ATTENTION=math")
 
     # Clone, checkout exact commit, install dev requirements
-    cmds.append("echo '[RUNPOD] Cloning repository into /tmp/repo...'")
+    cmds.append("echo '[RUNPOD] Cloning target repository into /tmp/repo...'")
     cmds.append(f'rm -rf "$REPO_DIR" && git clone {shlex.quote(repo_url)} "$REPO_DIR"')
     cmds.append('cd "$REPO_DIR"')
     cmds.append(f"git checkout {shlex.quote(commit_hash)}")
@@ -164,13 +240,31 @@ def _build_container_script(
         '[ -f "$REPO_DIR/requirements_dev.txt" ] || { echo "[RUNPOD] ERROR: requirements_dev.txt missing at repo root: $REPO_DIR/requirements_dev.txt"; ls -la "$REPO_DIR"; exit 1; }'
     )
     cmds.append('pip install -r "$REPO_DIR/requirements_dev.txt"')
+
+    # Always ensure runpod_service (auxiliary) repo is available
+    cmds.append(f'REPO_URL={shlex.quote(repo_url or "")}')
+    cmds.append(f'REPO_COMMIT={shlex.quote(commit_hash or "")}')
+    cmds.append(f'RUNPOD_SERVICE_REPO_URL={shlex.quote(runpod_service_repo_url or "")}')
+    cmds.append(f'RUNPOD_SERVICE_COMMIT={shlex.quote(runpod_service_commit or "")}')
+    cmds.append("AUX_DIR=/opt/runpod_service_repo")
+    cmds.append(
+        'if [ "$RUNPOD_SERVICE_REPO_URL" = "$REPO_URL" ] || [ -z "$RUNPOD_SERVICE_REPO_URL" ]; then '
+        'AUX_DIR="$REPO_DIR"; '
+        'echo "[RUNPOD] Using target repo as auxiliary (runpod_service)"; '
+        'else echo "[RUNPOD] Cloning auxiliary repo into $AUX_DIR..."; '
+        'rm -rf "$AUX_DIR"; git clone "$RUNPOD_SERVICE_REPO_URL" "$AUX_DIR"; '
+        '(cd "$AUX_DIR" && git checkout "$RUNPOD_SERVICE_COMMIT" ); fi'
+    )
     script_log = f"/runpod-volume/{script_relpath.name}_$(date +%Y%m%d_%H%M%S).log"
-    script_cmd = (
-        f'log_file="{script_log}"; '
-        f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
-    ).rstrip()
+    cmds.append(f'log_file="{script_log}"')
+    cmds.append("export log_file")
+    # Ensure repository roots are on PYTHONPATH so top-level modules resolve (target + auxiliary)
+    cmds.append('export PYTHONPATH="$REPO_DIR:${PYTHONPATH:-}"')
+    cmds.append('export PYTHONPATH="$AUX_DIR:$PYTHONPATH"')
     cmds.append("echo '[RUNPOD] Launching script in repo...'")
-    cmds.append(script_cmd)
+    cmds.append(
+        f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
+    )
     cmds.append("tail -f /dev/null")
     return " && ".join(cmds)
 
@@ -278,6 +372,17 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
         _ensure_git_clean(repo_root)
         repo_url = _git_remote_url(repo_root)
         commit_hash = _git_commit_hash(repo_root)
+        branch = _get_current_branch(repo_root)
+        if branch and not _branch_matches_origin(repo_root, branch, commit_hash):
+            remote_sha = _get_origin_branch_sha(repo_root, branch)
+            raise RunPodError(
+                (
+                    f"Preflight failed: local HEAD {commit_hash[:7]} on branch '{branch}' "
+                    f"does not match origin/{branch} {remote_sha[:7] if remote_sha else 'missing'}.\n"
+                    f"We clone from origin and then checkout that exact commit. Push your branch so that "
+                    f"origin/{branch} contains {commit_hash} (e.g., `git push origin HEAD:{branch}`)."
+                )
+            )
         try:
             script_relpath = script_abs.relative_to(repo_root)
         except ValueError:
@@ -300,11 +405,28 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
         print(f"Warning: failed to initialize local W&B run: {exc}")
 
     # Build container script
+    clone_url = _normalize_repo_url(repo_url or "") if repo_url else None
+    # Also prepare cloning the runpod_service repo itself so its APIs are available inside the container
+    runpod_service_root = Path(__file__).resolve().parents[1]
+    if not _is_git_repo(runpod_service_root):
+        raise RunPodError(
+            f"runpod_service must be inside a git repository (got: {runpod_service_root})."
+        )
+    runpod_service_url = _git_remote_url(runpod_service_root)
+    if not runpod_service_url:
+        raise RunPodError("Failed to resolve runpod_service git remote URL (origin).")
+    runpod_service_commit = _git_commit_hash(runpod_service_root)
+    if not runpod_service_commit:
+        raise RunPodError("Failed to resolve runpod_service git commit hash.")
+    runpod_service_clone = _normalize_repo_url(runpod_service_url)
+
     container_script = _build_container_script(
-        repo_url=repo_url,
+        repo_url=clone_url,
         commit_hash=commit_hash,
         script_relpath=script_relpath,
         forwarded_args=cfg.script_args,
+        runpod_service_repo_url=runpod_service_clone,
+        runpod_service_commit=runpod_service_commit,
     )
 
     docker_args = _quote_bash_for_graphql(container_script)
