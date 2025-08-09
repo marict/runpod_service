@@ -204,8 +204,8 @@ def _build_container_script(
     commit_hash: Optional[str],
     script_relpath: Optional[Path],
     forwarded_args: List[str],
-    runpod_service_repo_url: Optional[str] = None,
-    runpod_service_commit: Optional[str] = None,
+    runpod_service_repo_url: str,
+    runpod_service_commit: str,
 ) -> str:
     # 0) Clean up NVIDIA/CUDA APT sources to avoid hash-mismatch errors
     nvidia_repo_cleanup = "rm -f /etc/apt/sources.list.d/cuda*.list /etc/apt/sources.list.d/nvidia*.list || true"
@@ -242,10 +242,10 @@ def _build_container_script(
     cmds.append('pip install -r "$REPO_DIR/requirements_dev.txt"')
 
     # Always ensure runpod_service (auxiliary) repo is available
-    cmds.append(f'REPO_URL={shlex.quote(repo_url or "")}')
-    cmds.append(f'REPO_COMMIT={shlex.quote(commit_hash or "")}')
-    cmds.append(f'RUNPOD_SERVICE_REPO_URL={shlex.quote(runpod_service_repo_url or "")}')
-    cmds.append(f'RUNPOD_SERVICE_COMMIT={shlex.quote(runpod_service_commit or "")}')
+    cmds.append(f"REPO_URL={shlex.quote(repo_url)}")
+    cmds.append(f"REPO_COMMIT={shlex.quote(commit_hash)}")
+    cmds.append(f"RUNPOD_SERVICE_REPO_URL={shlex.quote(runpod_service_repo_url)}")
+    cmds.append(f"RUNPOD_SERVICE_COMMIT={shlex.quote(runpod_service_commit)}")
     cmds.append("RUNPOD_SERVICE_DIR=/opt/runpod_service_repo")
     cmds.append(
         'if [ "$RUNPOD_SERVICE_REPO_URL" = "$REPO_URL" ] || [ -z "$RUNPOD_SERVICE_REPO_URL" ]; then '
@@ -260,13 +260,10 @@ def _build_container_script(
     cmds.append("export log_file")
     # Ensure repository roots are on PYTHONPATH so top-level modules resolve (target + runpod_service)
     cmds.append('export PYTHONPATH="$REPO_DIR:${PYTHONPATH:-}"')
-    # Robust runpod_service import path
     cmds.append(
-        'if [ -d "$RUNPOD_SERVICE_DIR/runpod_service" ]; then '
-        'export PYTHONPATH="$RUNPOD_SERVICE_DIR:$PYTHONPATH"; '
-        'elif [ -f "$RUNPOD_SERVICE_DIR/__init__.py" ] && [ "$(basename "$RUNPOD_SERVICE_DIR")" = "runpod_service" ]; then '
-        'export PYTHONPATH="$(dirname "$RUNPOD_SERVICE_DIR"):$PYTHONPATH"; '
-        'else echo "[RUNPOD] ERROR: could not locate runpod_service package at $RUNPOD_SERVICE_DIR"; ls -la "$RUNPOD_SERVICE_DIR"; exit 1; fi'
+        'if [ -f "$RUNPOD_SERVICE_DIR/runpod_service.py" ] && [ -f "$RUNPOD_SERVICE_DIR/__init__.py" ]; then '
+        '  export PYTHONPATH="$RUNPOD_SERVICE_DIR:$PYTHONPATH"; '
+        'else echo "[RUNPOD] ERROR: expected flat runpod_service module at $RUNPOD_SERVICE_DIR (missing runpod_service.py/__init__.py)"; ls -la "$RUNPOD_SERVICE_DIR"; exit 1; fi'
     )
     # Install runpod_service repo requirements if it is a different repo than the target
     cmds.append(
