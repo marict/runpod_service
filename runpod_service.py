@@ -261,6 +261,13 @@ def _build_container_script(
     # Ensure repository roots are on PYTHONPATH so top-level modules resolve (target + auxiliary)
     cmds.append('export PYTHONPATH="$REPO_DIR:${PYTHONPATH:-}"')
     cmds.append('export PYTHONPATH="$AUX_DIR:$PYTHONPATH"')
+    # Install auxiliary repo requirements if it is a different repo than the target
+    cmds.append(
+        '[ "$AUX_DIR" = "$REPO_DIR" ] || { '
+        '[ -f "$AUX_DIR/requirements_dev.txt" ] '
+        '|| { echo "[RUNPOD] ERROR: requirements_dev.txt missing at $AUX_DIR"; ls -la "$AUX_DIR"; exit 1; }; '
+        'pip install -r "$AUX_DIR/requirements_dev.txt"; }'
+    )
     cmds.append("echo '[RUNPOD] Launching script in repo...'")
     cmds.append(
         f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
