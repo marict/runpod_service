@@ -407,7 +407,7 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     # Build container script
     clone_url = _normalize_repo_url(repo_url or "") if repo_url else None
     # Also prepare cloning the runpod_service repo itself so its APIs are available inside the container
-    runpod_service_root = Path(__file__).resolve().parents[1]
+    runpod_service_root = Path(__file__).resolve().parent
     if not _is_git_repo(runpod_service_root):
         raise RunPodError(
             f"runpod_service must be inside a git repository (got: {runpod_service_root})."
