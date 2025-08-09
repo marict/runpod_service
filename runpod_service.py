@@ -246,27 +246,33 @@ def _build_container_script(
     cmds.append(f'REPO_COMMIT={shlex.quote(commit_hash or "")}')
     cmds.append(f'RUNPOD_SERVICE_REPO_URL={shlex.quote(runpod_service_repo_url or "")}')
     cmds.append(f'RUNPOD_SERVICE_COMMIT={shlex.quote(runpod_service_commit or "")}')
-    cmds.append("AUX_DIR=/opt/runpod_service_repo")
+    cmds.append("RUNPOD_SERVICE_DIR=/opt/runpod_service_repo")
     cmds.append(
         'if [ "$RUNPOD_SERVICE_REPO_URL" = "$REPO_URL" ] || [ -z "$RUNPOD_SERVICE_REPO_URL" ]; then '
-        'AUX_DIR="$REPO_DIR"; '
-        'echo "[RUNPOD] Using target repo as auxiliary (runpod_service)"; '
-        'else echo "[RUNPOD] Cloning auxiliary repo into $AUX_DIR..."; '
-        'rm -rf "$AUX_DIR"; git clone "$RUNPOD_SERVICE_REPO_URL" "$AUX_DIR"; '
-        '(cd "$AUX_DIR" && git checkout "$RUNPOD_SERVICE_COMMIT" ); fi'
+        'RUNPOD_SERVICE_DIR="$REPO_DIR"; '
+        'echo "[RUNPOD] Using target repo as runpod_service"; '
+        'else echo "[RUNPOD] Cloning runpod_service repo into $RUNPOD_SERVICE_DIR..."; '
+        'rm -rf "$RUNPOD_SERVICE_DIR"; git clone "$RUNPOD_SERVICE_REPO_URL" "$RUNPOD_SERVICE_DIR"; '
+        '(cd "$RUNPOD_SERVICE_DIR" && git checkout "$RUNPOD_SERVICE_COMMIT" ); fi'
     )
     script_log = f"/runpod-volume/{script_relpath.name}_$(date +%Y%m%d_%H%M%S).log"
     cmds.append(f'log_file="{script_log}"')
     cmds.append("export log_file")
-    # Ensure repository roots are on PYTHONPATH so top-level modules resolve (target + auxiliary)
+    # Ensure repository roots are on PYTHONPATH so top-level modules resolve (target + runpod_service)
     cmds.append('export PYTHONPATH="$REPO_DIR:${PYTHONPATH:-}"')
-    cmds.append('export PYTHONPATH="$AUX_DIR:$PYTHONPATH"')
-    # Install auxiliary repo requirements if it is a different repo than the target
+    # Make runpod_service import path robust whether the repo root is the package dir or contains it
+    cmds.append('RUNPOD_SERVICE_IMPORT_DIR="$RUNPOD_SERVICE_DIR"')
     cmds.append(
-        '[ "$AUX_DIR" = "$REPO_DIR" ] || { '
-        '[ -f "$AUX_DIR/requirements_dev.txt" ] '
-        '|| { echo "[RUNPOD] ERROR: requirements_dev.txt missing at $AUX_DIR"; ls -la "$AUX_DIR"; exit 1; }; '
-        'pip install -r "$AUX_DIR/requirements_dev.txt"; }'
+        'if [ -d "$RUNPOD_SERVICE_DIR/runpod_service" ]; then RUNPOD_SERVICE_IMPORT_DIR="$RUNPOD_SERVICE_DIR"; '
+        'elif [ "$(basename "$RUNPOD_SERVICE_DIR")" = "runpod_service" ]; then RUNPOD_SERVICE_IMPORT_DIR="$(dirname "$RUNPOD_SERVICE_DIR")"; fi'
+    )
+    cmds.append('export PYTHONPATH="$RUNPOD_SERVICE_IMPORT_DIR:$PYTHONPATH"')
+    # Install runpod_service repo requirements if it is a different repo than the target
+    cmds.append(
+        '[ "$RUNPOD_SERVICE_DIR" = "$REPO_DIR" ] || { '
+        '[ -f "$RUNPOD_SERVICE_DIR/requirements_dev.txt" ] '
+        '|| { echo "[RUNPOD] ERROR: requirements_dev.txt missing at $RUNPOD_SERVICE_DIR"; ls -la "$RUNPOD_SERVICE_DIR"; exit 1; }; '
+        'pip install -r "$RUNPOD_SERVICE_DIR/requirements_dev.txt"; }'
     )
     cmds.append("echo '[RUNPOD] Launching script in repo...'")
     cmds.append(
