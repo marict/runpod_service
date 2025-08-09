@@ -515,6 +515,7 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
 
 
 def stop_runpod(pod_id: Optional[str] = None, api_key: Optional[str] = None) -> bool:
+    print("Attempting to stop pod...")
     # Try via SDK then REST fallback
     pod_id = pod_id or os.getenv("RUNPOD_POD_ID")
     api_key = api_key or os.getenv("RUNPOD_API_KEY")
