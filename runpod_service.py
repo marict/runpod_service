@@ -37,8 +37,6 @@ class LaunchConfig:
     script_path: Path
     script_args: List[str]
     pod_name: Optional[str]
-    attach: Optional[str]
-    attach_note: Optional[str]
     gpu_type: str
     api_key: Optional[str]
     wandb_project: str
@@ -336,10 +334,7 @@ def _parse_cli(argv: List[str]) -> LaunchConfig:
         "\nExample:\n"
         "  # Launch new pod\n"
         "  python /Users/paul_curry/ai2/runpod_service/runpod_service.py "
-        "/Users/paul_curry/ai2/runpod_service/service_test.py hello --named-arg world --pod-name service-test\n\n"
-        "  # Attach to existing pod\n"
-        "  python /Users/paul_curry/ai2/runpod_service/runpod_service.py "
-        "/Users/paul_curry/ai2/runpod_service/service_test.py hello --named-arg world --attach service-test --attach-note quick-check\n"
+        "/Users/paul_curry/ai2/runpod_service/service_test.py hello --named-arg world --pod-name service-test\n"
     )
     parser = argparse.ArgumentParser(
         description=(
@@ -351,16 +346,7 @@ def _parse_cli(argv: List[str]) -> LaunchConfig:
         epilog=example,
     )
     parser.add_argument("script", help="Path to the Python script inside a git repo")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--pod-name")
-    group.add_argument(
-        "--attach", help="Attach to an existing pod by name and run the script there"
-    )
-    parser.add_argument(
-        "--attach-note",
-        default="",
-        help="Optional note appended to W&B run name when attaching",
-    )
+    parser.add_argument("--pod-name")
     parser.add_argument("--gpu-type", default=DEFAULT_GPU_TYPE)
     parser.add_argument("--api-key")
     parser.add_argument("--wandb-project", default="nalm-benchmark")
@@ -379,42 +365,12 @@ def _parse_cli(argv: List[str]) -> LaunchConfig:
         script_path=Path(known.script),
         script_args=unknown,
         pod_name=known.pod_name,
-        attach=known.attach,
-        attach_note=known.attach_note,
         gpu_type=known.gpu_type,
         api_key=known.api_key,
         wandb_project=known.wandb_project,
         debug=known.debug,
         lifetime_minutes=known.lifetime_minutes,
     )
-
-
-def _find_pod_by_name(pod_name: str) -> Optional[dict]:
-    try:
-        pods = runpod.get_pods()
-    except Exception as exc:
-        raise RunPodError(f"Failed to list pods: {exc}") from exc
-    for p in pods:
-        if isinstance(p, dict) and p.get("name") == pod_name:
-            return p
-    return None
-
-
-def _exec_on_pod(pod_id: str, command: str) -> None:
-    # Use GraphQL to run a background command; keep container alive regardless
-    try:
-        # runpod sdk may expose 'exec' helpers; use REST fallback via /v2 endpoint if needed
-        # Here we leverage the 'docker_args' style by invoking bash -c inside the running pod via job API
-        # For simplicity, use start_ssh to run commands is not available; rely on /v2 to start a job is overkill.
-        # As a pragmatic approach, we use the "sshCommand" mutation if present in SDK.
-        if hasattr(runpod, "exec_pod"):
-            runpod.exec_pod(pod_id, command)
-            return
-        raise RunPodError(
-            "exec capability not available in runpod SDK; please update SDK"
-        )
-    except Exception as exc:
-        raise RunPodError(f"Failed to execute on pod {pod_id}: {exc}") from exc
 
 
 def start_runpod_job(cfg: LaunchConfig) -> str:
@@ -462,48 +418,6 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
                 f"requirements_dev.txt not found at repository root: {requirements_path}. "
                 "This file is required for environment setup."
             )
-
-    # ATTACH MODE: run inside an existing pod without creating a new one
-    if cfg.attach:
-        runpod.api_key = (
-            cfg.api_key
-            or os.getenv("RUNPOD_API_KEY")
-            or getattr(runpod, "api_key", None)
-        )
-        if not runpod.api_key:
-            raise RunPodError(
-                "RunPod API key is required. Provide via --api-key or set RUNPOD_API_KEY"
-            )
-
-        pod = _find_pod_by_name(cfg.attach)
-        if pod is None:
-            raise RunPodError(f"Pod with name '{cfg.attach}' not found")
-        pod_id = pod.get("id")
-        if not pod_id:
-            raise RunPodError(f"Pod '{cfg.attach}' missing id")
-
-        # Validate script path existence on the pod's mounted repo directory
-        # We assume prior launches cloned the repo to /tmp/repo; run within that context
-        # Use relative path within repo as in new-pod flow
-        script_rel = (
-            str(script_relpath) if script_relpath is not None else cfg.script_path.name
-        )
-        args_str = _join_shell_args(cfg.script_args)
-        # Prepare W&B naming
-        attach_note = f"-{cfg.attach_note}" if cfg.attach_note else ""
-        run_name = f"{pod_id}-{cfg.attach}{attach_note}"
-        # Command: ensure env, then run the script in background tmux/screen-less way
-        cmd = (
-            f"export WANDB_PROJECT={shlex.quote(cfg.wandb_project)}; "
-            f"export WANDB_NAME={shlex.quote(run_name)}; "
-            f"cd /tmp/repo || cd /workspace || true; "
-            f"[ -f {shlex.quote(script_rel)} ] || {{ echo '[RUNPOD] ERROR: script not found: {script_rel}'; exit 2; }}; "
-            f"nohup python -u {shlex.quote(script_rel)} {args_str} --pod-name {shlex.quote(cfg.attach)} "
-            f">/runpod-volume/$(basename {shlex.quote(script_rel)}).attach.log 2>&1 & disown"
-        )
-        _exec_on_pod(pod_id, cmd)
-        print(f"Attached to pod {cfg.attach} ({pod_id}) and launched: {script_rel}")
-        return str(pod_id)
 
     # Init W&B locally first and open browser for new pod creation
     placeholder_name = f"pod-id-pending{'-' + pod_name if pod_name else ''}"
