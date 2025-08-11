@@ -5,6 +5,8 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
@@ -25,6 +27,10 @@ DEFAULT_GPU_TYPE = "NVIDIA RTX 2000 Ada Generation"
 DEFAULT_IMAGE = "runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04"
 NETWORK_VOLUME_ID = "h3tyejvqqb"
 
+GPU_TO_PRICE = {
+    "NVIDIA RTX 2000 Ada Generation": 0.24,
+}
+
 
 @dataclass
 class LaunchConfig:
@@ -35,6 +41,7 @@ class LaunchConfig:
     api_key: Optional[str]
     wandb_project: str
     debug: bool = False
+    lifetime_minutes: int | None = None
 
 
 def _is_git_repo(path: Path) -> bool:
@@ -344,6 +351,12 @@ def _parse_cli(argv: List[str]) -> LaunchConfig:
     parser.add_argument(
         "--wandb-project", dest="wandb_project", default="nalm-benchmark"
     )
+    parser.add_argument(
+        "--lifetime-minutes",
+        type=int,
+        default=None,
+        help="Lifetime in minutes; if set, the launcher will stop the pod after this many minutes and print estimated cost.",
+    )
     parser.add_argument("--debug", action="store_true", help="Print debug info")
 
     # Parse known args; forward the rest to the script
@@ -357,6 +370,7 @@ def _parse_cli(argv: List[str]) -> LaunchConfig:
         api_key=known.api_key,
         wandb_project=known.wandb_project,
         debug=known.debug,
+        lifetime_minutes=known.lifetime_minutes,
     )
 
 
@@ -511,6 +525,32 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
 
     print(f"Starting job '{pod_name}' (pod {pod_id}) on {cfg.gpu_type}")
     print(f"W&B: {wandb_url}")
+
+    # Optional lifetime enforcement with cost estimate
+    if cfg.lifetime_minutes and cfg.lifetime_minutes > 0:
+        if cfg.gpu_type in GPU_TO_PRICE:
+            hourly_price = GPU_TO_PRICE[cfg.gpu_type]
+            minutes_price = hourly_price / 60
+            print(
+                f"[RUNPOD] Estimated cost for {cfg.lifetime_minutes:.2f}m: ${minutes_price * cfg.lifetime_minutes:.2f}, at ${hourly_price:.2f}/h"
+            )
+        else:
+            print(
+                f"[RUNPOD] GPU type {cfg.gpu_type} does not have price in GPU_TO_PRICE"
+            )
+
+        def _stop_later():
+            try:
+                sleep_s = max(1, int(cfg.lifetime_minutes * 60))
+                time.sleep(sleep_s)
+                print("[RUNPOD] Lifetime reached; stopping pod...")
+                stop_runpod(pod_id=pod_id, api_key=runpod.api_key)
+            except Exception as exc:
+                print(f"[RUNPOD] Failed to stop pod after lifetime: {exc}")
+
+        t = threading.Thread(target=_stop_later, daemon=False)
+        t.start()
+
     return str(pod_id)
 
 
