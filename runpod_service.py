@@ -489,21 +489,34 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
         }
     )
 
-    # Create the pod
-    pod = runpod.create_pod(
-        name=pod_name,
-        image_name=DEFAULT_IMAGE,
-        gpu_type_id=gpu_type_id,
-        gpu_count=1,
-        min_vcpu_count=6,
-        min_memory_in_gb=16,
-        volume_in_gb=1000,
-        container_disk_in_gb=1000,
-        network_volume_id=NETWORK_VOLUME_ID,
-        env=env_vars,
-        start_ssh=False,
-        docker_args=docker_args,
-    )
+    # Create the pod with simple retries to handle transient API/capacity errors
+    last_exc: Exception | None = None
+    pod = None
+    for attempt in range(1, 4):
+        try:
+            pod = runpod.create_pod(
+                name=pod_name,
+                image_name=DEFAULT_IMAGE,
+                gpu_type_id=gpu_type_id,
+                gpu_count=1,
+                min_vcpu_count=6,
+                min_memory_in_gb=16,
+                volume_in_gb=1000,
+                container_disk_in_gb=1000,
+                network_volume_id=NETWORK_VOLUME_ID,
+                env=env_vars,
+                start_ssh=False,
+                docker_args=docker_args,
+            )
+            break
+        except Exception as exc:  # noqa: BLE001
+            if attempt >= 3:
+                raise
+            delay_s = 5 * attempt
+            print(
+                f"[RUNPOD] create_pod failed (attempt {attempt}/3): {exc}. Retrying in {delay_s}s..."
+            )
+            time.sleep(delay_s)
 
     pod_id = pod.get("id") if isinstance(pod, dict) else None
     if not pod_id:
