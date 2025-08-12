@@ -43,8 +43,9 @@ def init_wandb_runpod() -> wandb.sdk.wandb_run.Run:
         entity = get_required_var("WANDB_ENTITY")
         run_id = get_required_var("WANDB_RUN_ID")
         resume = "allow" if run_id else None
-        name = get_required_var("WANDB_NAME")
         notes = get_required_var("WANDB_NOTES")
+
+        name = get_required_var("RUNPOD_POD_ID") + " - " + get_required_var("POD_NAME")
 
         return wandb.init(
             api_key=api_key,

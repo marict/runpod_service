@@ -443,6 +443,7 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     gpu_type_id = _resolve_gpu_id(cfg.gpu_type)
 
     env_vars = {}
+    env_vars["POD_NAME"] = pod_name
     # Pass through WANDB context (strict preflight)
     wandb_api_key = os.getenv("WANDB_API_KEY")
     if not wandb_api_key:
