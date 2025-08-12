@@ -38,12 +38,13 @@ def get_required_var(var_name: str) -> str:
 # On runpod get everything from env
 def init_wandb_runpod() -> wandb.sdk.wandb_run.Run:
     try:
-        # Check that we have all the required env vars
-        _ = get_required_var("WANDB_API_KEY")
         project = get_required_var("WANDB_PROJECT")
         entity = get_required_var("WANDB_ENTITY")
-        run_id = get_required_var("WANDB_RUN_ID")
-        resume = "allow"
+
+        # In some cases we want to create a new run even
+        # on runpod.
+        run_id = os.getenv("WANDB_RUN_ID", None)
+        resume = "allow" if run_id else None
 
         name = get_required_var("RUNPOD_POD_ID") + " - " + get_required_var("POD_NAME")
 
@@ -59,27 +60,10 @@ def init_wandb_runpod() -> wandb.sdk.wandb_run.Run:
         raise
 
 
-def init_wandb(
-    local_project: str = None, placeholder_name: str = None
-) -> wandb.sdk.wandb_run.Run:
-    if are_local():
-        if not local_project:
-            raise RuntimeError("local_project must be set when initializing local W&B")
-        if not placeholder_name:
-            raise RuntimeError(
-                "placeholder_name must be set when initializing local W&B"
-            )
-        return init_wandb_local(local_project, placeholder_name)
-    else:
-        return init_wandb_runpod()
-
-
 # We get project and placeholder name from runpod_launcher.py
 def init_wandb_local(project: str, placeholder_name: str) -> wandb.sdk.wandb_run.Run:
     try:
-        _ = get_required_var("WANDB_API_KEY")
         entity = get_required_var("WANDB_ENTITY")
-
         run = wandb.init(
             name=placeholder_name,
             project=project,
@@ -94,6 +78,23 @@ def init_wandb_local(project: str, placeholder_name: str) -> wandb.sdk.wandb_run
         print(f"Warning: failed to initialize local W&B run")
         raise
     return run
+
+
+def init_wandb(
+    local_project: str = None, placeholder_name: str = None
+) -> wandb.sdk.wandb_run.Run:
+    _ = get_required_var("WANDB_API_KEY")
+
+    if are_local():
+        if not local_project:
+            raise RuntimeError("local_project must be set when initializing local W&B")
+        if not placeholder_name:
+            raise RuntimeError(
+                "placeholder_name must be set when initializing local W&B"
+            )
+        return init_wandb_local(local_project, placeholder_name)
+    else:
+        return init_wandb_runpod()
 
 
 wrapper = wandb
