@@ -79,3 +79,6 @@ def init_wandb_local(project: str, placeholder_name: str) -> wandb.sdk.wandb_run
         print(f"Warning: failed to initialize local W&B run")
         raise
     return run
+
+
+wrapper = wandb
