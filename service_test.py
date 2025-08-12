@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-from . import wandb_setup as wandb  # type: ignore
+from runpod_service import wandb_setup as wandb
 
 
 def collect_system_info() -> Dict[str, Any]:
