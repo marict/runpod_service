@@ -38,16 +38,16 @@ def get_required_var(var_name: str) -> str:
 # On runpod get everything from env
 def init_wandb_runpod() -> wandb.sdk.wandb_run.Run:
     try:
-        api_key = get_required_var("WANDB_API_KEY")
+        # Check that we have all the required env vars
+        _ = get_required_var("WANDB_API_KEY")
         project = get_required_var("WANDB_PROJECT")
         entity = get_required_var("WANDB_ENTITY")
         run_id = get_required_var("WANDB_RUN_ID")
-        resume = "allow" if run_id else None
+        resume = "allow"
 
         name = get_required_var("RUNPOD_POD_ID") + " - " + get_required_var("POD_NAME")
 
         return wandb.init(
-            api_key=api_key,
             project=project,
             entity=entity,
             id=run_id,
