@@ -294,45 +294,6 @@ def _build_container_script(
     return " && ".join(cmds)
 
 
-def _open_browser(url: str) -> None:
-    chrome_candidates = [
-        "google-chrome",
-        "google-chrome-stable",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "chrome",
-        "chromium",
-        "chromium-browser",
-    ]
-    for cmd in chrome_candidates:
-        try:
-            subprocess.run([cmd, url], check=True, capture_output=True, timeout=5)
-            print(f"Opened W&B URL in Chrome: {url}")
-            return
-        except Exception:
-            continue
-    print(f"Could not open Chrome. Please manually visit: {url}")
-
-
-def _init_local_wandb(project: str, run_name: str) -> Tuple[str, str]:
-    # Prefer env for project; default to provided project (which defaults to 'nalm-benchmark')
-    env_project = os.getenv("WANDB_PROJECT", project or "nalm-benchmark")
-    env_entity = os.getenv("WANDB_ENTITY")
-    if not env_entity:
-        raise RunPodError(
-            "WANDB_ENTITY is required in the local environment. Export it and retry."
-        )
-    run = wandb.init(
-        project=str(env_project),
-        entity=env_entity,
-        name=run_name,
-        tags=["runpod", "general"],
-        notes=run_name,
-    )
-    url = f"{run.url}/logs"
-    _open_browser(url)
-    return url, run.id
-
-
 def _resolve_gpu_id(gpu_type: str) -> str:
     try:
         gpus = runpod.get_gpus()
@@ -436,12 +397,9 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
 
     # Init W&B locally first and open browser for new pod creation
     placeholder_name = f"pod-id-pending{'-' + pod_name if pod_name else ''}"
-    wandb_url = ""
-    wandb_run_id = ""
-    try:
-        wandb_url, wandb_run_id = _init_local_wandb(cfg.wandb_project, placeholder_name)
-    except Exception as exc:  # noqa: BLE001
-        print(f"Warning: failed to initialize local W&B run: {exc}")
+    run = wandb.init_wandb_local(cfg.wandb_project, placeholder_name)
+    wandb_url = run.url
+    wandb_run_id = run.id
 
     # Build container script
     clone_url = _normalize_repo_url(repo_url or "") if repo_url else None
@@ -557,10 +515,9 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
 
     # Rename W&B run to include actual pod id (and pod name)
     try:
-        if wandb.run is not None:
-            final_name = f"{pod_id}-{pod_name}" if pod_name else str(pod_id)
-            wandb.run.name = final_name
-            print(f"W&B run renamed to: {final_name}")
+        final_name = f"{pod_id}-{pod_name}" if pod_name else str(pod_id)
+        wandb.run.name = final_name
+        print(f"W&B run renamed to: {final_name}")
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: failed to rename W&B run: {exc}")
 

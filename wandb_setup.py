@@ -1,72 +1,83 @@
 from __future__ import annotations
 
-import json
 import os
-from typing import List
+import subprocess
 
 import wandb
 
 
-def _parse_tags(raw: str | None) -> List[str]:
-    if not raw:
-        return []
+def are_local():
+    return os.getenv("RUNPOD_POD_ID") is None
+
+
+def _open_browser(url: str) -> None:
+    chrome_candidates = [
+        "google-chrome",
+        "google-chrome-stable",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "chrome",
+        "chromium",
+        "chromium-browser",
+    ]
+    for cmd in chrome_candidates:
+        try:
+            subprocess.run([cmd, url], check=True, capture_output=True, timeout=5)
+            print(f"Opened W&B URL in Chrome: {url}")
+            return
+        except Exception:
+            continue
+    raise RuntimeError(f"Could not open Chrome for {url}")
+
+
+def get_required_var(var_name: str) -> str:
+    if not os.getenv(var_name):
+        raise RuntimeError(f"{var_name} must be set in the environment.")
+    return os.getenv(var_name)
+
+
+# On runpod get everything from env
+def init_wandb_runpod() -> wandb.sdk.wandb_run.Run:
     try:
-        parsed = json.loads(raw)
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(
-            "WANDB_TAGS must be a JSON array of strings, e.g. ['runpod','supervisor']."
-        ) from exc
-    if not isinstance(parsed, list) or not all(isinstance(t, str) for t in parsed):
-        raise RuntimeError(
-            "WANDB_TAGS must be a JSON array of strings, e.g. ['runpod','supervisor']."
+        api_key = get_required_var("WANDB_API_KEY")
+        project = get_required_var("WANDB_PROJECT")
+        entity = get_required_var("WANDB_ENTITY")
+        run_id = get_required_var("WANDB_RUN_ID")
+        resume = "allow" if run_id else None
+        name = get_required_var("WANDB_NAME")
+        notes = get_required_var("WANDB_NOTES")
+
+        return wandb.init(
+            api_key=api_key,
+            project=project,
+            entity=entity,
+            id=run_id,
+            resume=resume,
+            name=name,
+            notes=notes,
         )
-    return [t.strip() for t in parsed if t.strip()]
+    except Exception:
+        print(f"Warning: failed to initialize W&B on runpod")
+        raise
 
 
-def _init_wandb() -> wandb.sdk.wandb_run.Run:
-    api_key = os.getenv("WANDB_API_KEY")
-    project = os.getenv("WANDB_PROJECT", "nalm-benchmark")
-    entity = os.getenv("WANDB_ENTITY")
-
-    if not api_key:
-        raise RuntimeError("WANDB_API_KEY must be set in the environment.")
-    if not entity:
-        raise RuntimeError("WANDB_ENTITY must be set in the environment.")
-
-    run_id = os.getenv("WANDB_RUN_ID")
-    resume = "allow" if run_id else None
-    name = os.getenv("WANDB_NAME")
-    notes = os.getenv("WANDB_NOTES")
-    tags = _parse_tags(os.getenv("WANDB_TAGS"))
-
-    kwargs: dict = {"project": project, "entity": entity}
-    if run_id:
-        kwargs["id"] = run_id
-        kwargs["resume"] = resume
-    if name:
-        kwargs["name"] = name
-    if notes:
-        kwargs["notes"] = notes
-    if tags:
-        kwargs["tags"] = tags
-
+# We get project and placeholder name from runpod_launcher.py
+def init_wandb_local(project: str, placeholder_name: str) -> wandb.sdk.wandb_run.Run:
     try:
-        return wandb.init(**kwargs)
-    except Exception as exc:  # noqa: BLE001
-        context = {
-            "project": project,
-            "entity": entity,
-            "has_run_id": bool(run_id),
-            "has_name": bool(name),
-            "tags": tags,
-        }
-        raise RuntimeError(
-            f"W&B initialization failed with context: {context}. Ensure WANDB_* env vars are correct and network access is available."
-        ) from exc
+        api_key = get_required_var("WANDB_API_KEY")
+        entity = get_required_var("WANDB_ENTITY")
 
+        run = wandb.init(
+            name=placeholder_name,
+            api_key=api_key,
+            project=project,
+            entity=entity,
+        )
 
-# Import side-effect: initialize W&B immediately and expose a safe wrapper
-run = _init_wandb()
-wrapper = wandb
-
-__all__ = ["run", "wrapper"]
+        # If run is local, open browser to logs
+        if are_local():
+            url = f"{run.url}/logs"
+            _open_browser(url)
+    except Exception:
+        print(f"Warning: failed to initialize local W&B run")
+        raise
+    return run
