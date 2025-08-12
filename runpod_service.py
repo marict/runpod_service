@@ -15,7 +15,18 @@ import requests
 import runpod
 from graphql.language.print_string import print_string
 
-import runpod_service.wandb_setup as wandb
+# Support both script and package execution for this launcher
+try:
+    from . import wandb_setup as wandb  # type: ignore
+except Exception:
+    import importlib
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _PKG_PARENT = _Path(__file__).resolve().parent.parent
+    if str(_PKG_PARENT) not in _sys.path:
+        _sys.path.insert(0, str(_PKG_PARENT))
+    wandb = importlib.import_module("runpod_service.wandb_setup")
 
 
 class RunPodError(Exception):
