@@ -286,8 +286,10 @@ def _build_container_script(
     cmds.append(
         f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
     )
-    # Only keep the container alive when KEEP_ALIVE=1
-    cmds.append('if [ "${KEEP_ALIVE:-1}" = "1" ]; then tail -f /dev/null; fi')
+    # Only keep the container alive when KEEP_ALIVE=1 (log explicitly for visibility)
+    cmds.append(
+        'if [ "${KEEP_ALIVE:-1}" = "1" ]; then echo "[RUNPOD] KEEP_ALIVE=1: idling after script (tail -f /dev/null)"; tail -f /dev/null; fi'
+    )
     return " && ".join(cmds)
 
 
