@@ -69,7 +69,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    wandb.init_wandb_runpod()
+    wandb.init_wandb()
     print("[service_test] Starting test...")
     print(f"[service_test] Positional arg: {args.positional}")
     print(f"[service_test] Named arg: {args.named_arg}")

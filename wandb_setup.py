@@ -59,6 +59,21 @@ def init_wandb_runpod() -> wandb.sdk.wandb_run.Run:
         raise
 
 
+def init_wandb(
+    local_project: str = None, placeholder_name: str = None
+) -> wandb.sdk.wandb_run.Run:
+    if are_local():
+        if not local_project:
+            raise RuntimeError("local_project must be set when initializing local W&B")
+        if not placeholder_name:
+            raise RuntimeError(
+                "placeholder_name must be set when initializing local W&B"
+            )
+        return init_wandb_local(local_project, placeholder_name)
+    else:
+        return init_wandb_runpod()
+
+
 # We get project and placeholder name from runpod_launcher.py
 def init_wandb_local(project: str, placeholder_name: str) -> wandb.sdk.wandb_run.Run:
     try:

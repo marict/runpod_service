@@ -394,7 +394,7 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
 
     # Init W&B locally first and open browser for new pod creation
     placeholder_name = f"pod-id-pending{'-' + pod_name if pod_name else ''}"
-    run = wandb.init_wandb_local(cfg.wandb_project, placeholder_name)
+    run = wandb.init_wandb(cfg.wandb_project, placeholder_name)
     wandb_url = run.url
     wandb_run_id = run.id
 
