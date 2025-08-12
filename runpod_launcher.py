@@ -254,14 +254,14 @@ def _build_container_script(
     cmds.append(f"RUNPOD_SERVICE_REPO_URL={shlex.quote(runpod_service_repo_url)}")
     cmds.append(f"RUNPOD_SERVICE_COMMIT={shlex.quote(runpod_service_commit)}")
     cmds.append("RUNPOD_SERVICE_DIR=/runpod_service")
+    # Always clone dedicated runpod_service repo; never reuse the target repo
     cmds.append(
-        'if [ "$RUNPOD_SERVICE_REPO_URL" = "$REPO_URL" ] || [ -z "$RUNPOD_SERVICE_REPO_URL" ]; then '
-        'RUNPOD_SERVICE_DIR="$REPO_DIR"; '
-        'echo "[RUNPOD] Using target repo as runpod_service"; '
-        'else echo "[RUNPOD] Cloning runpod_service repo into $RUNPOD_SERVICE_DIR..."; '
-        'rm -rf "$RUNPOD_SERVICE_DIR"; git clone "$RUNPOD_SERVICE_REPO_URL" "$RUNPOD_SERVICE_DIR"; '
-        '(cd "$RUNPOD_SERVICE_DIR" && git checkout "$RUNPOD_SERVICE_COMMIT" ); fi'
+        'echo "[RUNPOD] Cloning runpod_service repo into $RUNPOD_SERVICE_DIR..."'
     )
+    cmds.append(
+        'rm -rf "$RUNPOD_SERVICE_DIR"; git clone "$RUNPOD_SERVICE_REPO_URL" "$RUNPOD_SERVICE_DIR"'
+    )
+    cmds.append('(cd "$RUNPOD_SERVICE_DIR" && git checkout "$RUNPOD_SERVICE_COMMIT" )')
     script_log = f"/runpod-volume/{script_relpath.name}_$(date +%Y%m%d_%H%M%S).log"
     cmds.append(f'log_file="{script_log}"')
     cmds.append("export log_file")
@@ -274,13 +274,12 @@ def _build_container_script(
         'ls -la "$RUNPOD_SERVICE_DIR"; exit 1; }'
     )
     cmds.append('export PYTHONPATH="$(dirname "$RUNPOD_SERVICE_DIR"):${PYTHONPATH:-}"')
-    # Install runpod_service repo requirements if it is a different repo than the target
+    # Install runpod_service repo requirements
     cmds.append(
-        '[ "$RUNPOD_SERVICE_DIR" = "$REPO_DIR" ] || { '
         '[ -f "$RUNPOD_SERVICE_DIR/requirements_dev.txt" ] '
-        '|| { echo "[RUNPOD] ERROR: requirements_dev.txt missing at $RUNPOD_SERVICE_DIR"; ls -la "$RUNPOD_SERVICE_DIR"; exit 1; }; '
-        'pip install -r "$RUNPOD_SERVICE_DIR/requirements_dev.txt"; }'
+        '|| { echo "[RUNPOD] ERROR: requirements_dev.txt missing at $RUNPOD_SERVICE_DIR"; ls -la "$RUNPOD_SERVICE_DIR"; exit 1; }'
     )
+    cmds.append('pip install -r "$RUNPOD_SERVICE_DIR/requirements_dev.txt"')
     cmds.append("echo '[RUNPOD] Launching script in repo (cd to $REPO_DIR)...'")
     # Ensure we are at the repository root before launching the target script
     cmds.append('cd "$REPO_DIR"')
