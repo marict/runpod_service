@@ -6,8 +6,8 @@ import subprocess
 import wandb
 
 
-def are_local():
-    return os.getenv("RUNPOD_POD_ID") is None
+def are_local() -> bool:
+    return os.getenv("ON_RUNPOD") != "1"
 
 
 def _open_browser(url: str) -> None:
