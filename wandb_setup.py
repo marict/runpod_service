@@ -63,12 +63,11 @@ def init_wandb_runpod() -> wandb.sdk.wandb_run.Run:
 # We get project and placeholder name from runpod_launcher.py
 def init_wandb_local(project: str, placeholder_name: str) -> wandb.sdk.wandb_run.Run:
     try:
-        api_key = get_required_var("WANDB_API_KEY")
+        _ = get_required_var("WANDB_API_KEY")
         entity = get_required_var("WANDB_ENTITY")
 
         run = wandb.init(
             name=placeholder_name,
-            api_key=api_key,
             project=project,
             entity=entity,
         )
