@@ -267,13 +267,13 @@ def _build_container_script(
     cmds.append("export log_file")
     # Ensure repository roots are on PYTHONPATH so top-level modules resolve (target + runpod_service)
     cmds.append('export PYTHONPATH="$REPO_DIR:${PYTHONPATH:-}"')
-    # Simplified: require standard package layout at $RUNPOD_SERVICE_DIR/runpod_service/__init__.py
+    # Flat-package layout: repo root IS the package (expects $RUNPOD_SERVICE_DIR/__init__.py)
     cmds.append(
-        '[ -f "$RUNPOD_SERVICE_DIR/runpod_service/__init__.py" ] || { '
-        'echo "[RUNPOD] ERROR: expected $RUNPOD_SERVICE_DIR/runpod_service/__init__.py"; '
+        '[ -f "$RUNPOD_SERVICE_DIR/__init__.py" ] || { '
+        'echo "[RUNPOD] ERROR: expected $RUNPOD_SERVICE_DIR/__init__.py"; '
         'ls -la "$RUNPOD_SERVICE_DIR"; exit 1; }'
     )
-    cmds.append('export PYTHONPATH="$RUNPOD_SERVICE_DIR:${PYTHONPATH:-}"')
+    cmds.append('export PYTHONPATH="$(dirname "$RUNPOD_SERVICE_DIR"):${PYTHONPATH:-}"')
     # Install runpod_service repo requirements if it is a different repo than the target
     cmds.append(
         '[ "$RUNPOD_SERVICE_DIR" = "$REPO_DIR" ] || { '
