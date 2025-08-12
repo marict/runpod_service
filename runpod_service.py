@@ -490,7 +490,6 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     )
 
     # Create the pod with simple retries to handle transient API/capacity errors
-    last_exc: Exception | None = None
     pod = None
     for attempt in range(1, 4):
         try:
