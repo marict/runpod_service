@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional
 
 import runpod
 from graphql.language.print_string import print_string
@@ -286,7 +286,8 @@ def _build_container_script(
     cmds.append(
         f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
     )
-    cmds.append("tail -f /dev/null")
+    # Only keep the container alive when KEEP_ALIVE=1
+    cmds.append('if [ "${KEEP_ALIVE:-1}" = "1" ]; then tail -f /dev/null; fi')
     return " && ".join(cmds)
 
 
