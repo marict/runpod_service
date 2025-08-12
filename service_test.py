@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-import wandb
+from . import wandb_setup as wandb  # type: ignore
 
 
 def collect_system_info() -> Dict[str, Any]:

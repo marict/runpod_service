@@ -279,7 +279,9 @@ def _build_container_script(
         '|| { echo "[RUNPOD] ERROR: requirements_dev.txt missing at $RUNPOD_SERVICE_DIR"; ls -la "$RUNPOD_SERVICE_DIR"; exit 1; }; '
         'pip install -r "$RUNPOD_SERVICE_DIR/requirements_dev.txt"; }'
     )
-    cmds.append("echo '[RUNPOD] Launching script in repo...'")
+    cmds.append("echo '[RUNPOD] Launching script in repo (cd to $REPO_DIR)...'")
+    # Ensure we are at the repository root before launching the target script
+    cmds.append('cd "$REPO_DIR"')
     cmds.append(
         f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
     )
@@ -307,8 +309,16 @@ def _open_browser(url: str) -> None:
 
 
 def _init_local_wandb(project: str, run_name: str) -> Tuple[str, str]:
+    # Prefer env for project; default to provided project (which defaults to 'nalm-benchmark')
+    env_project = os.getenv("WANDB_PROJECT", project or "nalm-benchmark")
+    env_entity = os.getenv("WANDB_ENTITY")
+    if not env_entity:
+        raise RunPodError(
+            "WANDB_ENTITY is required in the local environment. Export it and retry."
+        )
     run = wandb.init(
-        project=project,
+        project=str(env_project),
+        entity=env_entity,
         name=run_name,
         tags=["runpod", "general"],
         notes=run_name,
@@ -473,10 +483,25 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     gpu_type_id = _resolve_gpu_id(cfg.gpu_type)
 
     env_vars = {}
-    # Pass through WANDB context
-    if os.getenv("WANDB_API_KEY"):
-        env_vars["WANDB_API_KEY"] = os.getenv("WANDB_API_KEY", "")
-    env_vars["WANDB_PROJECT"] = cfg.wandb_project
+    # Pass through WANDB context (strict preflight)
+    wandb_api_key = os.getenv("WANDB_API_KEY")
+    if not wandb_api_key:
+        raise RunPodError(
+            "WANDB_API_KEY is required in the local environment. Export it and retry."
+        )
+    env_vars["WANDB_API_KEY"] = wandb_api_key
+
+    # WANDB_PROJECT defaults to CLI/default if not present in env
+    env_vars["WANDB_PROJECT"] = os.getenv(
+        "WANDB_PROJECT", cfg.wandb_project or "nalm-benchmark"
+    )
+
+    wandb_entity = os.getenv("WANDB_ENTITY")
+    if not wandb_entity:
+        raise RunPodError(
+            "WANDB_ENTITY is required in the local environment. Set WANDB_ENTITY to your workspace (e.g., 'paul-michael-curry-paul-curry-productions')."
+        )
+    env_vars["WANDB_ENTITY"] = wandb_entity
     if wandb_run_id:
         env_vars["WANDB_RUN_ID"] = wandb_run_id
         env_vars["WANDB_RESUME"] = "allow"
