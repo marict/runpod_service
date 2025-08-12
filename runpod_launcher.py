@@ -253,7 +253,7 @@ def _build_container_script(
     cmds.append(f"REPO_COMMIT={shlex.quote(commit_hash)}")
     cmds.append(f"RUNPOD_SERVICE_REPO_URL={shlex.quote(runpod_service_repo_url)}")
     cmds.append(f"RUNPOD_SERVICE_COMMIT={shlex.quote(runpod_service_commit)}")
-    cmds.append("RUNPOD_SERVICE_DIR=/opt/runpod_service_repo")
+    cmds.append("RUNPOD_SERVICE_DIR=/runpod_service")
     cmds.append(
         'if [ "$RUNPOD_SERVICE_REPO_URL" = "$REPO_URL" ] || [ -z "$RUNPOD_SERVICE_REPO_URL" ]; then '
         'RUNPOD_SERVICE_DIR="$REPO_DIR"; '
@@ -267,16 +267,13 @@ def _build_container_script(
     cmds.append("export log_file")
     # Ensure repository roots are on PYTHONPATH so top-level modules resolve (target + runpod_service)
     cmds.append('export PYTHONPATH="$REPO_DIR:${PYTHONPATH:-}"')
-    # Ensure importable package path regardless of layout
+    # Simplified: require standard package layout at $RUNPOD_SERVICE_DIR/runpod_service/__init__.py
     cmds.append(
-        'if [ -d "$RUNPOD_SERVICE_DIR/runpod_service" ] && [ -f "$RUNPOD_SERVICE_DIR/runpod_service/__init__.py" ]; then '
-        '  export PYTHONPATH="$RUNPOD_SERVICE_DIR:$PYTHONPATH"; '
-        'elif [ -f "$RUNPOD_SERVICE_DIR/__init__.py" ]; then '
-        '  export PYTHONPATH="$(dirname "$RUNPOD_SERVICE_DIR"):$PYTHONPATH"; '
-        'elif [ -f "$RUNPOD_SERVICE_DIR/runpod_launcher.py" ]; then '
-        '  export PYTHONPATH="$RUNPOD_SERVICE_DIR:$PYTHONPATH"; '
-        'else echo "[RUNPOD] ERROR: expected runpod_service package or module at $RUNPOD_SERVICE_DIR"; ls -la "$RUNPOD_SERVICE_DIR"; exit 1; fi'
+        '[ -f "$RUNPOD_SERVICE_DIR/runpod_service/__init__.py" ] || { '
+        'echo "[RUNPOD] ERROR: expected $RUNPOD_SERVICE_DIR/runpod_service/__init__.py"; '
+        'ls -la "$RUNPOD_SERVICE_DIR"; exit 1; }'
     )
+    cmds.append('export PYTHONPATH="$RUNPOD_SERVICE_DIR:${PYTHONPATH:-}"')
     # Install runpod_service repo requirements if it is a different repo than the target
     cmds.append(
         '[ "$RUNPOD_SERVICE_DIR" = "$REPO_DIR" ] || { '
