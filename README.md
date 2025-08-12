@@ -21,7 +21,7 @@ export WANDB_API_KEY="your_wandb_api_key" # for Weights & Biases (optional)
 
 ### Quick start
 ```bash
-python runpod_service.py /abs/path/to/repo/path/to/script.py \
+python runpod_launcher.py /abs/path/to/repo/path/to/script.py \
   --pod-name my-job \
   --gpu-type "NVIDIA RTX 2000 Ada Generation" \
   --wandb-project my-project \
