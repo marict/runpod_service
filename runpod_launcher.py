@@ -444,8 +444,6 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
 
     env_vars = {}
     env_vars["POD_NAME"] = pod_name
-    # Explicit flag so in-pod processes can reliably detect RunPod environment
-    env_vars["ON_RUNPOD"] = "1"
     # Pass through WANDB context (strict preflight)
     wandb_api_key = os.getenv("WANDB_API_KEY")
     if not wandb_api_key:
