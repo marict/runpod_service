@@ -527,6 +527,7 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
         print(f"W&B run renamed to: {final_name}")
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: failed to rename W&B run: {exc}")
+        raise
 
     print(f"Starting job '{pod_name}' (pod {pod_id}) on {cfg.gpu_type}")
     print(f"W&B: {wandb_url}")
@@ -552,6 +553,7 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
                 stop_runpod.stop_runpod(pod_id=pod_id, api_key=runpod.api_key)
             except Exception as exc:
                 print(f"[RUNPOD] Failed to stop pod after lifetime: {exc}")
+                raise
 
         t = threading.Thread(target=_stop_later, daemon=False)
         t.start()
