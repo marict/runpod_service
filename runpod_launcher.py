@@ -283,12 +283,16 @@ def _build_container_script(
     cmds.append("echo '[RUNPOD] Launching script in repo (cd to $REPO_DIR)...'")
     # Ensure we are at the repository root before launching the target script
     cmds.append('cd "$REPO_DIR"')
+    # If LIFETIME_MINUTES > 0, run training under timeout and do not tail; else honor KEEP_ALIVE
+    python_cmd = f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
     cmds.append(
-        f'python -u {shlex.quote(str(script_relpath))} {_join_shell_args(forwarded_args)} 2>&1 | tee "$log_file" || true'
-    )
-    # Only keep the container alive when KEEP_ALIVE=1 (log explicitly for visibility)
-    cmds.append(
-        'if [ "${KEEP_ALIVE:-1}" = "1" ]; then echo "[RUNPOD] KEEP_ALIVE=1: idling after script (tail -f /dev/null)"; tail -f /dev/null; fi'
+        'if [ -n "${LIFETIME_MINUTES:-}" ] && [ "${LIFETIME_MINUTES}" -gt 0 ]; then '
+        '  echo "[RUNPOD] Running with timeout ${LIFETIME_MINUTES}m"; '
+        f'  timeout "${{LIFETIME_MINUTES}}m" {python_cmd}; '
+        "else "
+        f"  {python_cmd}; "
+        '  if [ "${KEEP_ALIVE:-1}" = "1" ]; then echo "[RUNPOD] KEEP_ALIVE=1: idling after script (tail -f /dev/null)"; tail -f /dev/null; fi; '
+        "fi"
     )
     return " && ".join(cmds)
 
@@ -476,6 +480,9 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
             "TRANSFORMERS_CACHE": "/workspace/.cache/huggingface/transformers",
         }
     )
+    # Provide lifetime to the container so it can override keep-alive locally as a safety net
+    if cfg.lifetime_minutes and cfg.lifetime_minutes > 0:
+        env_vars["LIFETIME_MINUTES"] = str(cfg.lifetime_minutes)
 
     # Create the pod with simple retries to handle transient API/capacity errors
     pod = None
@@ -516,7 +523,7 @@ def start_runpod_job(cfg: LaunchConfig) -> str:
     # Rename W&B run to include actual pod id (and pod name)
     try:
         final_name = f"{pod_id}-{pod_name}" if pod_name else str(pod_id)
-        wandb.run.name = final_name
+        run.name = final_name
         print(f"W&B run renamed to: {final_name}")
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: failed to rename W&B run: {exc}")
